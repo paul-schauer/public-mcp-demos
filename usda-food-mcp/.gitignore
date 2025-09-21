@@ -2,3 +2,6 @@ GEMINI.md
 .venv/
 .env
 input.json
+__pycache__/
+*.pyc
+usda_fdc_mcp.log
