@@ -275,5 +275,39 @@ def main():
             asyncio.run(fdc_client.client.aclose())
 
 
+async def handle_http_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle an incoming HTTP envelope (JSON-RPC style) and dispatch to tool functions.
+
+    Expected envelope format:
+      {"tool": "search_foods", "id": "1", "arguments": {...}}
+
+    Returns a JSON-RPC style response dict.
+    """
+    # Minimal validation
+    tool_name = envelope.get("tool")
+    req_id = envelope.get("id")
+    args = envelope.get("arguments") or {}
+
+    mapping = {
+        "get_food": get_food,
+        "get_foods": get_foods,
+        "search_foods": search_foods,
+        "list_foods": list_foods,
+    }
+
+    if tool_name not in mapping:
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+
+    fn = mapping[tool_name]
+
+    try:
+        # Call the coroutine function with the provided arguments
+        result = await fn(**args) if asyncio.iscoroutinefunction(fn) else fn(**args)
+        return {"jsonrpc": "2.0", "id": req_id, "result": result}
+    except Exception as e:
+        # Return JSON-RPC style error
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+
+
 if __name__ == "__main__":
     main()
