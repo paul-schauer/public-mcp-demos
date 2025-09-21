@@ -255,8 +255,10 @@ def main():
         # Run the server
         logger.info("Starting USDA Food Data Central MCP Server...")
         logger.info("Available tools: get_food, get_foods, search_foods, list_foods")
-        print("[SERVER DEBUG] Starting MCP server...", file=sys.stderr)
-        app.run()
+        print("[SERVER DEBUG] Starting MCP server in streamable-http transport...", file=sys.stderr)
+        # Use explicit transport compatible with FastMCP.run signature
+        # FastMCP.run(transport: 'stdio'|'sse'|'streamable-http', mount_path: Optional[str] = None)
+        app.run('streamable-http')
     except KeyboardInterrupt:
         logger.info("Server shutting down...")
         print("[SERVER DEBUG] Server shutting down (KeyboardInterrupt)", file=sys.stderr)
