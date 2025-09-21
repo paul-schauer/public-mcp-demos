@@ -1,35 +1,64 @@
 #!/usr/bin/env python3
-"""
-USDA Food Data Central (FDC) MCP Server
+import sys
+print("[SERVER DEBUG] usda_fdc_mcp_server.py starting", file=sys.stderr)
+import sys
+try:
+    """
+    USDA Food Data Central (FDC) MCP Server
 
-This server provides access to the USDA Food Data Central API through MCP tools.
-It allows searching for foods, getting detailed food information, and listing foods.
-"""
+    This server provides access to the USDA Food Data Central API through MCP tools.
+    It allows searching for foods, getting detailed food information, and listing foods.
+    """
 
-import asyncio
-import logging
-from dotenv import load_dotenv
-import os
-from typing import Any, Dict, List, Optional, Union
+    import asyncio
+    import logging
+    import logging.handlers
+    from dotenv import load_dotenv
+    import os
+    from typing import Any, Dict, List, Optional, Union
 
+    import httpx
+    from mcp.server.fastmcp import FastMCP
 
-import httpx
-from mcp.server.fastmcp import FastMCP
+    # Load environment variables from .env file
+    load_dotenv()
 
+    # Set up logging to file only (not stdout to avoid interfering with MCP)
+    logger = logging.getLogger("usda-fdc-mcp")
+    logger.setLevel(logging.INFO)
 
-# Load environment variables from .env file
-load_dotenv()
+    # Configure logging to write to file only
+    file_handler = logging.handlers.RotatingFileHandler(
+        'usda_fdc_mcp.log',
+        maxBytes=1024*1024,  # 1MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("usda-fdc-mcp")
+    # Prevent logging to stdout/stderr
+    logger.propagate = False
 
-# API Configuration
-BASE_URL = "https://api.nal.usda.gov/fdc"
-API_VERSION = "v1"
+    # API Configuration
+    BASE_URL = "https://api.nal.usda.gov/fdc"
+    API_VERSION = "v1"
 
-# Initialize the MCP server
-app = FastMCP("usda-fdc")
+    # Initialize the MCP server
+    app = FastMCP("usda-fdc")
+
+    # Initialize the FDC client at module level
+    api_key = os.getenv("USDA_FDC_API_KEY")
+except Exception as e:
+    import traceback
+    print("[SERVER TOP-LEVEL ERROR]", file=sys.stderr)
+    print(str(e), file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+if not api_key:
+    logger.error("USDA_FDC_API_KEY environment variable not set")
+    logger.info("Please get your free API key from: https://fdc.nal.usda.gov/api-key-signup.html")
+    exit(1)
 
 class FDCAPIClient:
     """Client for interacting with the USDA Food Data Central API."""
@@ -156,8 +185,17 @@ class FDCAPIClient:
         return await self._make_request("POST", "foods/list", json_data=data)
 
 
-# Global FDC client instance
+# Global FDC client instance and event loop
 fdc_client: Optional[FDCAPIClient] = None
+loop: Optional[asyncio.AbstractEventLoop] = None
+
+async def cleanup():
+    """Clean up resources."""
+    global fdc_client
+    if fdc_client:
+        logger.info("Closing FDC client...")
+        await fdc_client.client.aclose()
+        fdc_client = None
 
 
 
@@ -166,33 +204,40 @@ fdc_client: Optional[FDCAPIClient] = None
 @app.tool()
 async def get_food(fdc_id: str, format_type: str = "full", nutrients: Optional[List[int]] = None) -> Dict[str, Any]:
     """Get details for a single food item by FDC ID."""
+    print(f"[SERVER DEBUG] get_food called with fdc_id={fdc_id}, format_type={format_type}, nutrients={nutrients}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
+        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.get_food(fdc_id, format_type, nutrients)
 
 @app.tool()
 async def get_foods(fdc_ids: List[str], format_type: str = "full", nutrients: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     """Get details for multiple food items by FDC IDs."""
+    print(f"[SERVER DEBUG] get_foods called with fdc_ids={fdc_ids}, format_type={format_type}, nutrients={nutrients}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
+        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.get_foods(fdc_ids, format_type, nutrients)
 
 @app.tool()
 async def search_foods(query: str, data_type: Optional[List[str]] = None, page_size: int = 50, page_number: int = 1, sort_by: Optional[str] = None, sort_order: Optional[str] = None, brand_owner: Optional[str] = None) -> Dict[str, Any]:
     """Search for foods using keywords."""
-    print("search_foods called")
+    print(f"[SERVER DEBUG] search_foods called with query={query}, data_type={data_type}, page_size={page_size}, page_number={page_number}, sort_by={sort_by}, sort_order={sort_order}, brand_owner={brand_owner}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
+        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.search_foods(query, data_type, page_size, page_number, sort_by, sort_order, brand_owner)
 
 @app.tool()
 async def list_foods(data_type: Optional[List[str]] = None, page_size: int = 50, page_number: int = 1, sort_by: Optional[str] = None, sort_order: Optional[str] = None) -> List[Dict[str, Any]]:
     """Get a paged list of foods."""
+    print(f"[SERVER DEBUG] list_foods called with data_type={data_type}, page_size={page_size}, page_number={page_number}, sort_by={sort_by}, sort_order={sort_order}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
+        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.list_foods(data_type, page_size, page_number, sort_by, sort_order)
 
@@ -202,22 +247,30 @@ async def list_foods(data_type: Optional[List[str]] = None, page_size: int = 50,
 def main():
     """Main entry point for the MCP server."""
     global fdc_client
-    
-    # Get API key from environment variable
-    api_key = os.getenv("USDA_FDC_API_KEY")
-    if not api_key:
-        logger.error("USDA_FDC_API_KEY environment variable not set")
-        logger.info("Please get your free API key from: https://fdc.nal.usda.gov/api-key-signup.html")
-        exit(1)
-    
-    # Initialize the FDC client
-    fdc_client = FDCAPIClient(api_key)
-    
-    # Run the server
-    logger.info("Starting USDA Food Data Central MCP Server...")
-    logger.info("Available tools: get_food, get_foods, search_foods, list_foods")
-    
-    app.run()
+    print("[SERVER DEBUG] Entering main()", file=sys.stderr)
+    try:
+        # Initialize the FDC client
+        fdc_client = FDCAPIClient(api_key)
+        print("[SERVER DEBUG] FDC client initialized", file=sys.stderr)
+        # Run the server
+        logger.info("Starting USDA Food Data Central MCP Server...")
+        logger.info("Available tools: get_food, get_foods, search_foods, list_foods")
+        print("[SERVER DEBUG] Starting MCP server...", file=sys.stderr)
+        app.run()
+    except KeyboardInterrupt:
+        logger.info("Server shutting down...")
+        print("[SERVER DEBUG] Server shutting down (KeyboardInterrupt)", file=sys.stderr)
+    except Exception as e:
+        logger.error(f"Server error: {str(e)}")
+        print(f"[SERVER DEBUG] Server error: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        raise
+    finally:
+        # Clean up resources
+        if fdc_client and fdc_client.client:
+            print("[SERVER DEBUG] Closing FDC client...", file=sys.stderr)
+            asyncio.run(fdc_client.client.aclose())
 
 
 if __name__ == "__main__":
