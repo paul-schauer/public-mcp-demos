@@ -119,6 +119,20 @@ async def messages(request: Request, authorization: Optional[str] = Header(defau
         try:
             mcp_module = importlib.import_module("usda_fdc_mcp_server")
             logger.info("Imported usda_fdc_mcp_server module")
+            # If the MCP module defines an FDCAPIClient and an api_key but has no
+            # initialized `fdc_client`, initialize it here so tool functions can
+            # call the USDA API without needing to run the MCP `main()` process.
+            try:
+                if getattr(mcp_module, "fdc_client", None) is None and hasattr(mcp_module, "FDCAPIClient") and getattr(mcp_module, "api_key", None):
+                    try:
+                        # Create and assign the client instance
+                        mcp_module.fdc_client = mcp_module.FDCAPIClient(mcp_module.api_key)
+                        logger.info("Initialized FDCAPIClient in MCP module")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize FDCAPIClient: {e}")
+            except Exception:
+                # non-fatal; proceed without client initialization
+                pass
         except BaseException as exc:
             # Catch BaseException to avoid SystemExit from the MCP module killing
             # the adapter (the module may call exit() when API key is missing).
@@ -183,3 +197,29 @@ async def messages(request: Request, authorization: Optional[str] = Header(defau
 async def healthz():
     """Simple health endpoint for platform readiness checks."""
     return JSONResponse({"ok": True, "status": "ready"})
+
+
+@api.get("/mcp_status")
+async def mcp_status():
+    """Return minimal status about the MCP module and FDC client.
+
+    This returns booleans only and does NOT expose the API key.
+    Use this to confirm whether the module was imported and whether the
+    FDC client was initialized.
+    """
+    mod_loaded = False
+    has_api_key = False
+    client_initialized = False
+    if mcp_module is not None:
+        mod_loaded = True
+        try:
+            has_api_key = bool(getattr(mcp_module, "api_key", None))
+            client_initialized = getattr(mcp_module, "fdc_client", None) is not None
+        except Exception:
+            pass
+
+    return JSONResponse({
+        "mcp_module_loaded": mod_loaded,
+        "has_api_key": has_api_key,
+        "fdc_client_initialized": client_initialized,
+    })

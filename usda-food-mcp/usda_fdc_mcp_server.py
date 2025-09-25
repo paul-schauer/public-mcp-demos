@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import sys
-print("[SERVER DEBUG] usda_fdc_mcp_server.py starting", file=sys.stderr)
 import sys
 try:
     """
@@ -189,6 +188,17 @@ class FDCAPIClient:
 fdc_client: Optional[FDCAPIClient] = None
 loop: Optional[asyncio.AbstractEventLoop] = None
 
+# If an API key is available at import time, initialize the FDC client so
+# callers that import this module (for example the HTTP adapter) can use the
+# tool functions without running the full `main()` process.
+try:
+    if api_key and fdc_client is None:
+        fdc_client = FDCAPIClient(api_key)
+        logger.info("Initialized module-level FDCAPIClient at import time")
+except Exception as e:
+    # Non-fatal: leave fdc_client as None and let callers handle errors.
+    logger.warning(f"Could not initialize FDCAPIClient at import: {e}")
+
 async def cleanup():
     """Clean up resources."""
     global fdc_client
@@ -207,7 +217,6 @@ async def get_food(fdc_id: str, format_type: str = "full", nutrients: Optional[L
     print(f"[SERVER DEBUG] get_food called with fdc_id={fdc_id}, format_type={format_type}, nutrients={nutrients}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
-        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.get_food(fdc_id, format_type, nutrients)
 
@@ -217,7 +226,6 @@ async def get_foods(fdc_ids: List[str], format_type: str = "full", nutrients: Op
     print(f"[SERVER DEBUG] get_foods called with fdc_ids={fdc_ids}, format_type={format_type}, nutrients={nutrients}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
-        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.get_foods(fdc_ids, format_type, nutrients)
 
@@ -227,7 +235,6 @@ async def search_foods(query: str, data_type: Optional[List[str]] = None, page_s
     print(f"[SERVER DEBUG] search_foods called with query={query}, data_type={data_type}, page_size={page_size}, page_number={page_number}, sort_by={sort_by}, sort_order={sort_order}, brand_owner={brand_owner}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
-        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.search_foods(query, data_type, page_size, page_number, sort_by, sort_order, brand_owner)
 
@@ -237,7 +244,6 @@ async def list_foods(data_type: Optional[List[str]] = None, page_size: int = 50,
     print(f"[SERVER DEBUG] list_foods called with data_type={data_type}, page_size={page_size}, page_number={page_number}, sort_by={sort_by}, sort_order={sort_order}", file=sys.stderr)
     global fdc_client
     if fdc_client is None:
-        print("[SERVER DEBUG] FDC API client not initialized.", file=sys.stderr)
         raise Exception("FDC API client not initialized.")
     return await fdc_client.list_foods(data_type, page_size, page_number, sort_by, sort_order)
 
@@ -247,21 +253,17 @@ async def list_foods(data_type: Optional[List[str]] = None, page_size: int = 50,
 def main():
     """Main entry point for the MCP server."""
     global fdc_client
-    print("[SERVER DEBUG] Entering main()", file=sys.stderr)
     try:
         # Initialize the FDC client
         fdc_client = FDCAPIClient(api_key)
-        print("[SERVER DEBUG] FDC client initialized", file=sys.stderr)
         # Run the server
         logger.info("Starting USDA Food Data Central MCP Server...")
         logger.info("Available tools: get_food, get_foods, search_foods, list_foods")
-        print("[SERVER DEBUG] Starting MCP server in streamable-http transport...", file=sys.stderr)
         # Use explicit transport compatible with FastMCP.run signature
         # FastMCP.run(transport: 'stdio'|'sse'|'streamable-http', mount_path: Optional[str] = None)
         app.run('streamable-http')
     except KeyboardInterrupt:
         logger.info("Server shutting down...")
-        print("[SERVER DEBUG] Server shutting down (KeyboardInterrupt)", file=sys.stderr)
     except Exception as e:
         logger.error(f"Server error: {str(e)}")
         print(f"[SERVER DEBUG] Server error: {str(e)}", file=sys.stderr)
@@ -271,7 +273,6 @@ def main():
     finally:
         # Clean up resources
         if fdc_client and fdc_client.client:
-            print("[SERVER DEBUG] Closing FDC client...", file=sys.stderr)
             asyncio.run(fdc_client.client.aclose())
 
 
