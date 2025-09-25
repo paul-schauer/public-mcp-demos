@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from typing import Any, Optional, Dict
 
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, Request, Response, Header, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 import importlib
 import logging
@@ -188,7 +188,7 @@ async def mcp_post(request: Request, authorization: Optional[str] = Header(defau
 @api.get("/healthz")
 async def healthz():
     """Simple health endpoint for platform readiness checks."""
-    return JSONResponse({"ok": True, "status": "ready"})
+    return Response("OK", status_code=200)
 
 
 @api.get("/mcp_status")
