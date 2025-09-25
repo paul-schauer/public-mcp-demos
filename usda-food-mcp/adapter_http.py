@@ -61,7 +61,7 @@ async def mcp_get(authorization: Optional[str] = Header(default=None)):
     return StreamingResponse(sse_generator(), headers=headers)
 
 
-@api.post("/mcp")
+@api.post("/messages")
 async def mcp_post(request: Request, authorization: Optional[str] = Header(default=None)):
     """Accepts MCP JSON-RPC requests and returns responses."""
     _auth(authorization)
