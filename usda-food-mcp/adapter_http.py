@@ -188,7 +188,7 @@ async def mcp_post(request: Request, authorization: Optional[str] = Header(defau
 @api.get("/healthz")
 async def healthz():
     """Simple health endpoint for platform readiness checks."""
-    return JSONResponse({"ok": True, "status": "ready"})
+    return Response("", status_code=200)
 
 
 @api.get("/mcp_status")
