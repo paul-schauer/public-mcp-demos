@@ -160,33 +160,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    const a = args as any; // Type assertion for simplicity
     switch (name) {
       case "get_food":
-        const result1 = await fdcClient.getFood(args.fdc_id, args.format_type, args.nutrients);
+        const result1 = await fdcClient.getFood(a.fdc_id, a.format_type, a.nutrients);
         return { content: [{ type: "text", text: JSON.stringify(result1) }] };
 
       case "get_foods":
-        const result2 = await fdcClient.getFoods(args.fdc_ids, args.format_type, args.nutrients);
+        const result2 = await fdcClient.getFoods(a.fdc_ids, a.format_type, a.nutrients);
         return { content: [{ type: "text", text: JSON.stringify(result2) }] };
 
       case "search_foods":
-        const result3 = await fdcClient.searchFoods(args.query, {
-          dataType: args.data_type,
-          pageSize: args.page_size,
-          pageNumber: args.page_number,
-          sortBy: args.sort_by,
-          sortOrder: args.sort_order,
-          brandOwner: args.brand_owner
+        const result3 = await fdcClient.searchFoods(a.query, {
+          dataType: a.data_type,
+          pageSize: a.page_size,
+          pageNumber: a.page_number,
+          sortBy: a.sort_by,
+          sortOrder: a.sort_order,
+          brandOwner: a.brand_owner
         });
         return { content: [{ type: "text", text: JSON.stringify(result3) }] };
 
       case "list_foods":
         const result4 = await fdcClient.listFoods({
-          dataType: args.data_type,
-          pageSize: args.page_size,
-          pageNumber: args.page_number,
-          sortBy: args.sort_by,
-          sortOrder: args.sort_order
+          dataType: a.data_type,
+          pageSize: a.page_size,
+          pageNumber: a.page_number,
+          sortBy: a.sort_by,
+          sortOrder: a.sort_order
         });
         return { content: [{ type: "text", text: JSON.stringify(result4) }] };
 
@@ -194,7 +195,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
   } catch (error) {
-    throw new McpError(ErrorCode.InternalError, `Tool execution failed: ${error.message}`);
+    const err = error as Error;
+    throw new McpError(ErrorCode.InternalError, `Tool execution failed: ${err.message}`);
   }
 });
 
