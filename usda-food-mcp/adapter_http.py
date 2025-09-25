@@ -1,7 +1,8 @@
 import os
 import json
 import asyncio
-from typing import Any, Optional
+import uuid
+from typing import Any, Optional, Dict
 
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -23,6 +24,9 @@ MCP_TOKEN = os.getenv("MCP_BEARER_TOKEN")
 
 api = FastAPI()
 
+# Simple in-memory session store: session_id -> asyncio.Queue
+sessions: Dict[str, asyncio.Queue] = {}
+
 def _auth(auth_header: Optional[str]):
     if MCP_TOKEN:
         if not auth_header or not auth_header.startswith("Bearer "):
@@ -31,26 +35,56 @@ def _auth(auth_header: Optional[str]):
             raise HTTPException(status_code=401, detail="Bad bearer")
 
 
-async def sse_generator():
-    """Yield SSE events for heartbeat."""
+async def sse_generator(session_id: str):
+    """Yield SSE events for a session from the session queue."""
+    q = sessions.get(session_id)
+    if q is None:
+        yield "event: error\n"
+        yield f"data: {json.dumps({'error':'unknown session'})}\n\n"
+        return
+
     # initial comment to confirm connection
     yield ": connected\n\n"
     try:
         while True:
             try:
-                # heartbeat every 20 seconds
-                await asyncio.sleep(20.0)
+                item = await asyncio.wait_for(q.get(), timeout=20.0)
+            except asyncio.TimeoutError:
+                # heartbeat
                 yield ": ping\n\n"
-            except asyncio.CancelledError:
-                break
+                continue
+            # item should be JSON-serializable
+            data = json.dumps(item)
+            yield f"data: {data}\n\n"
     finally:
-        pass
+        # cleanup on disconnect
+        sessions.pop(session_id, None)
 
 
 @api.get("/mcp")
-async def mcp_get(authorization: Optional[str] = Header(default=None)):
-    """Return SSE stream for MCP notifications (heartbeat only)."""
+async def mcp_get(authorization: Optional[str] = Header(default=None), mcp_session_id: Optional[str] = Header(default=None)):
+    """Create or attach to an SSE session.
+
+    If no `mcp-session-id` is provided, we create one and return JSON with the id (application/json).
+    If `Accept: text/event-stream` is used by the client, they should call GET with that header and the session id to stream events.
+    """
     _auth(authorization)
+
+    # If the client is opening the SSE stream, they will include Accept: text/event-stream
+    # FastAPI/uvicorn handles Accept; here we always return the session id as JSON or stream
+    if not mcp_session_id:
+        # create session and return JSON with id
+        sid = uuid.uuid4().hex
+        sessions[sid] = asyncio.Queue()
+        logger.info(f"Created session {sid}")
+        return JSONResponse({"session": sid})
+
+    # If a session id provided, return a streaming response
+    sid = mcp_session_id
+    if sid not in sessions:
+        # create the session if it doesn't exist yet
+        sessions[sid] = asyncio.Queue()
+        logger.info(f"Opened SSE for session {sid}")
 
     headers = {
         "Content-Type": "text/event-stream",
@@ -58,12 +92,12 @@ async def mcp_get(authorization: Optional[str] = Header(default=None)):
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
-    return StreamingResponse(sse_generator(), headers=headers)
+    return StreamingResponse(sse_generator(sid), headers=headers)
 
 
 @api.post("/mcp")
-async def mcp_post(request: Request, authorization: Optional[str] = Header(default=None)):
-    """Accepts MCP JSON-RPC requests and returns responses."""
+async def mcp_post(request: Request, authorization: Optional[str] = Header(default=None), mcp_session_id: Optional[str] = Header(default=None)):
+    """Accepts MCP JSON-RPC requests and forwards it to the session queue or MCP handler."""
     _auth(authorization)
     # Read body safely
     try:
@@ -126,12 +160,24 @@ async def mcp_post(request: Request, authorization: Optional[str] = Header(defau
             # Return an informative JSON error so callers (and logs) can see the cause
             return JSONResponse({"ok": False, "error": str(exc), "traceback": tb}, status_code=500)
 
-        # Normalize the handler response so it's safe to JSON-encode
+        # Normalize the handler response so it's safe to JSON-encode and to push
+        # into the SSE queue. If it's not serializable, fall back to a string.
         try:
+            # Try serializing to ensure it's safe
             json.dumps(resp)
             resp_safe = resp
         except Exception:
             resp_safe = {"unserializable_result": str(resp)}
+
+        # If a session id was provided and a session queue exists, push the
+        # handler response (safe version) into the queue so any SSE client receives it.
+        sid = mcp_session_id
+        if sid and sid in sessions:
+            try:
+                await sessions[sid].put(resp_safe)
+            except Exception:
+                # best-effort: ignore queue push failures
+                pass
 
         return JSONResponse(resp_safe)
 
