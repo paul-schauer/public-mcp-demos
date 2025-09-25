@@ -1,8 +1,7 @@
 import os
 import json
 import asyncio
-import uuid
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -24,9 +23,6 @@ MCP_TOKEN = os.getenv("MCP_BEARER_TOKEN")
 
 api = FastAPI()
 
-# Simple in-memory session store: session_id -> asyncio.Queue
-sessions: Dict[str, asyncio.Queue] = {}
-
 def _auth(auth_header: Optional[str]):
     if MCP_TOKEN:
         if not auth_header or not auth_header.startswith("Bearer "):
@@ -35,56 +31,26 @@ def _auth(auth_header: Optional[str]):
             raise HTTPException(status_code=401, detail="Bad bearer")
 
 
-async def sse_generator(session_id: str):
-    """Yield SSE events for a session from the session queue."""
-    q = sessions.get(session_id)
-    if q is None:
-        yield "event: error\n"
-        yield f"data: {json.dumps({'error':'unknown session'})}\n\n"
-        return
-
+async def sse_generator():
+    """Yield SSE events for heartbeat."""
     # initial comment to confirm connection
     yield ": connected\n\n"
     try:
         while True:
             try:
-                item = await asyncio.wait_for(q.get(), timeout=20.0)
-            except asyncio.TimeoutError:
-                # heartbeat
+                # heartbeat every 20 seconds
+                await asyncio.sleep(20.0)
                 yield ": ping\n\n"
-                continue
-            # item should be JSON-serializable
-            data = json.dumps(item)
-            yield f"data: {data}\n\n"
+            except asyncio.CancelledError:
+                break
     finally:
-        # cleanup on disconnect
-        sessions.pop(session_id, None)
+        pass
 
 
 @api.get("/mcp")
-async def mcp_get(authorization: Optional[str] = Header(default=None), mcp_session_id: Optional[str] = Header(default=None)):
-    """Create or attach to an SSE session.
-
-    If no `mcp-session-id` is provided, we create one and return JSON with the id (application/json).
-    If `Accept: text/event-stream` is used by the client, they should call GET with that header and the session id to stream events.
-    """
+async def mcp_get(authorization: Optional[str] = Header(default=None)):
+    """Return SSE stream for MCP notifications (heartbeat only)."""
     _auth(authorization)
-
-    # If the client is opening the SSE stream, they will include Accept: text/event-stream
-    # FastAPI/uvicorn handles Accept; here we always return the session id as JSON or stream
-    if not mcp_session_id:
-        # create session and return JSON with id
-        sid = uuid.uuid4().hex
-        sessions[sid] = asyncio.Queue()
-        logger.info(f"Created session {sid}")
-        return JSONResponse({"session": sid})
-
-    # If a session id provided, return a streaming response
-    sid = mcp_session_id
-    if sid not in sessions:
-        # create the session if it doesn't exist yet
-        sessions[sid] = asyncio.Queue()
-        logger.info(f"Opened SSE for session {sid}")
 
     headers = {
         "Content-Type": "text/event-stream",
@@ -92,16 +58,12 @@ async def mcp_get(authorization: Optional[str] = Header(default=None), mcp_sessi
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
-    return StreamingResponse(sse_generator(sid), headers=headers)
+    return StreamingResponse(sse_generator(), headers=headers)
 
 
-@api.post("/messages")
-async def messages(request: Request, authorization: Optional[str] = Header(default=None), mcp_session_id: Optional[str] = Header(default=None)):
-    """Accepts a JSON envelope and forwards it to the session queue or MCP handler.
-
-    If `mcp_app` exposes an HTTP envelope handler, call it. Otherwise, echo the body and push
-    it into the session queue for the given session id (if present).
-    """
+@api.post("/mcp")
+async def mcp_post(request: Request, authorization: Optional[str] = Header(default=None)):
+    """Accepts MCP JSON-RPC requests and returns responses."""
     _auth(authorization)
     # Read body safely
     try:
@@ -111,7 +73,7 @@ async def messages(request: Request, authorization: Optional[str] = Header(defau
 
     # Lightweight request log (don't log Authorization header)
     headers = {k: v for k, v in request.headers.items() if k.lower() != "authorization"}
-    logger.info(f"POST /messages headers={headers} body={str(body)[:1000]}")
+    logger.info(f"POST /mcp headers={headers} body={str(body)[:1000]}")
 
     # Lazy import of MCP module if not loaded yet.
     global mcp_module
@@ -164,32 +126,16 @@ async def messages(request: Request, authorization: Optional[str] = Header(defau
             # Return an informative JSON error so callers (and logs) can see the cause
             return JSONResponse({"ok": False, "error": str(exc), "traceback": tb}, status_code=500)
 
-        # Normalize the handler response so it's safe to JSON-encode and to push
-        # into the SSE queue. If it's not serializable, fall back to a string.
+        # Normalize the handler response so it's safe to JSON-encode
         try:
-            # Try serializing to ensure it's safe
             json.dumps(resp)
             resp_safe = resp
         except Exception:
             resp_safe = {"unserializable_result": str(resp)}
 
-        # If a session id was provided and a session queue exists, push the
-        # handler response (safe version) into the queue so any SSE client receives it.
-        sid = mcp_session_id
-        if sid and sid in sessions:
-            try:
-                await sessions[sid].put(resp_safe)
-            except Exception:
-                # best-effort: ignore queue push failures
-                pass
-
         return JSONResponse(resp_safe)
 
-    # Otherwise, echo and push to session queue if provided
-    sid = mcp_session_id
-    if sid and sid in sessions:
-        await sessions[sid].put(body)
-
+    # Fallback
     return JSONResponse({"ok": True, "echo": body})
 
 
@@ -223,3 +169,121 @@ async def mcp_status():
         "has_api_key": has_api_key,
         "fdc_client_initialized": client_initialized,
     })
+
+
+async def handle_http_envelope(envelope: dict) -> dict:
+    """Handle an incoming MCP JSON-RPC envelope.
+
+    Supports standard MCP protocol messages: initialize, tools/list, tools/call.
+    """
+    # Validate JSON-RPC 2.0 format
+    if envelope.get("jsonrpc") != "2.0":
+        return {"jsonrpc": "2.0", "id": envelope.get("id"), "error": {"code": -32600, "message": "Invalid Request"}}
+
+    method = envelope.get("method")
+    req_id = envelope.get("id")
+    params = envelope.get("params") or {}
+
+    if method == "initialize":
+        # Return server capabilities
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {"listChanged": False}
+                },
+                "serverInfo": {
+                    "name": "usda-fdc-mcp",
+                    "version": "1.0.0"
+                }
+            }
+        }
+
+    elif method == "tools/list":
+        # Return list of available tools
+        tools = [
+            {
+                "name": "get_food",
+                "description": "Get details for a single food item by FDC ID.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fdc_id": {"type": "string", "description": "The FDC ID of the food item"},
+                        "format_type": {"type": "string", "enum": ["abridged", "full"], "default": "full", "description": "Format of the response"},
+                        "nutrients": {"type": "array", "items": {"type": "integer"}, "description": "List of nutrient IDs to include"}
+                    },
+                    "required": ["fdc_id"]
+                }
+            },
+            {
+                "name": "get_foods",
+                "description": "Get details for multiple food items by FDC IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fdc_ids": {"type": "array", "items": {"type": "string"}, "description": "List of FDC IDs"},
+                        "format_type": {"type": "string", "enum": ["abridged", "full"], "default": "full"},
+                        "nutrients": {"type": "array", "items": {"type": "integer"}}
+                    },
+                    "required": ["fdc_ids"]
+                }
+            },
+            {
+                "name": "search_foods",
+                "description": "Search for foods using keywords.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "data_type": {"type": "array", "items": {"type": "string"}, "description": "Data types to search"},
+                        "page_size": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+                        "page_number": {"type": "integer", "default": 1, "minimum": 1},
+                        "sort_by": {"type": "string"},
+                        "sort_order": {"type": "string", "enum": ["asc", "desc"]},
+                        "brand_owner": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "list_foods",
+                "description": "Get a paged list of foods.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "data_type": {"type": "array", "items": {"type": "string"}},
+                        "page_size": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+                        "page_number": {"type": "integer", "default": 1, "minimum": 1},
+                        "sort_by": {"type": "string"},
+                        "sort_order": {"type": "string", "enum": ["asc", "desc"]}
+                    }
+                }
+            }
+        ]
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"tools": tools}
+        }
+
+    elif method == "tools/call":
+        # Call a tool
+        tool_name = params.get("name")
+        args = params.get("arguments") or {}
+
+        global mcp_module
+        if mcp_module is None or not hasattr(mcp_module, tool_name):
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+
+        fn = getattr(mcp_module, tool_name)
+
+        try:
+            result = await fn(**args) if asyncio.iscoroutinefunction(fn) else fn(**args)
+            return {"jsonrpc": "2.0", "id": req_id, "result": result}
+        except Exception as e:
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+
+    else:
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
