@@ -5,3 +5,7 @@ input.json
 __pycache__/
 *.pyc
 usda_fdc_mcp.log
+node_modules/
+build/
+dist/
+*.tsbuildinfo

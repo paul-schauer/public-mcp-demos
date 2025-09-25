@@ -1,7 +1,8 @@
-FROM python:3.13-slim
+FROM node:18-slim
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY package*.json ./
+RUN npm ci
 COPY . .
+RUN npm run build
 EXPOSE 8080
-CMD uvicorn adapter_http:api --host 0.0.0.0 --port $PORT
+CMD ["npx", "-y", "supergateway", "--stdio", "node", "build/index.js", "--port", "$PORT", "--ssePath", "/sse", "--messagePath", "/message", "--cors", "--healthEndpoint", "/healthz"]
