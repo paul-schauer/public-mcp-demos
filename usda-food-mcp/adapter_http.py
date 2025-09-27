@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from typing import Any, Optional, Dict
 
-from fastapi import FastAPI, Request, Response, Header, HTTPException
+from fastapi import FastAPI, Request, Response, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 import importlib
 import logging
@@ -215,6 +215,54 @@ async def mcp_status():
         "has_api_key": has_api_key,
         "fdc_client_initialized": client_initialized,
     })
+
+
+@api.get("/sse")
+async def sse_get(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    mcp_session_id: Optional[str] = Header(default=None),
+    sessionId: Optional[str] = Query(default=None),
+):
+    """Standard SSE endpoint used by many MCP clients (e.g. n8n expects /sse).
+
+    If a session id is provided via header `mcp-session-id` or query `sessionId`,
+    attach to that session; otherwise create a new session. Emits an initial
+    event with the session id so clients can reference it for POST messages.
+    """
+    _auth(authorization)
+
+    # Determine or create session id
+    sid = mcp_session_id or sessionId or uuid.uuid4().hex
+    if sid not in sessions:
+        sessions[sid] = asyncio.Queue()
+        logger.info(f"Created SSE session {sid}")
+
+    async def generator_with_session(sid_local: str):
+        # Send initial session event so clients know the id
+        yield f"event: session\n"
+        yield f"data: {json.dumps({'session': sid_local})}\n\n"
+        # Then continue normal streaming
+        async for chunk in sse_generator(sid_local):
+            yield chunk
+
+    headers = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(generator_with_session(sid), headers=headers)
+
+
+@api.post("/messages")
+async def messages_post(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    mcp_session_id: Optional[str] = Header(default=None),
+):
+    """Alias for POST /mcp to support standard MCP client expectations."""
+    return await mcp_post(request, authorization, mcp_session_id)
 
 
 async def handle_http_envelope(envelope: dict) -> dict:

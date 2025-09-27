@@ -10,6 +10,7 @@ try:
     """
 
     import asyncio
+    import json
     import logging
     import logging.handlers
     from dotenv import load_dotenv
@@ -53,11 +54,28 @@ except Exception as e:
     print("[SERVER TOP-LEVEL ERROR]", file=sys.stderr)
     print(str(e), file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
-    sys.exit(1)
+    # Do not exit on import errors; allow the adapter to report a meaningful error
+    logger = logging.getLogger("usda-fdc-mcp") if 'logging' in globals() else None
+    if logger:
+        try:
+            logger.error(f"Top-level import error: {e}")
+        except Exception:
+            pass
+    # Safe fallback values so module remains importable
+    BASE_URL = "https://api.nal.usda.gov/fdc"
+    API_VERSION = "v1"
+    class Dummy:
+        pass
+    app = Dummy()
+    api_key = None
+
+# If API key is missing, do not exit; log and proceed (tools will error when called)
 if not api_key:
-    logger.error("USDA_FDC_API_KEY environment variable not set")
-    logger.info("Please get your free API key from: https://fdc.nal.usda.gov/api-key-signup.html")
-    exit(1)
+    try:
+        logger.error("USDA_FDC_API_KEY environment variable not set")
+        logger.info("Please get your free API key from: https://fdc.nal.usda.gov/api-key-signup.html")
+    except Exception:
+        pass
 
 class FDCAPIClient:
     """Client for interacting with the USDA Food Data Central API."""
@@ -277,38 +295,129 @@ def main():
 
 
 async def handle_http_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle an incoming HTTP envelope (JSON-RPC style) and dispatch to tool functions.
+    """Handle an incoming MCP JSON-RPC envelope.
 
-    Expected envelope format:
-      {"tool": "search_foods", "id": "1", "arguments": {...}}
-
-    Returns a JSON-RPC style response dict.
+    Supports standard MCP protocol messages: initialize, tools/list, tools/call.
     """
-    # Minimal validation
-    tool_name = envelope.get("tool")
+    # Validate JSON-RPC 2.0 format
+    if envelope.get("jsonrpc") != "2.0":
+        return {"jsonrpc": "2.0", "id": envelope.get("id"), "error": {"code": -32600, "message": "Invalid Request"}}
+
+    method = envelope.get("method")
     req_id = envelope.get("id")
-    args = envelope.get("arguments") or {}
+    params = envelope.get("params") or {}
 
-    mapping = {
-        "get_food": get_food,
-        "get_foods": get_foods,
-        "search_foods": search_foods,
-        "list_foods": list_foods,
-    }
+    if method == "initialize":
+        # Return server capabilities
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {"listChanged": False}
+                },
+                "serverInfo": {
+                    "name": "usda-fdc-mcp",
+                    "version": "1.0.0"
+                }
+            }
+        }
 
-    if tool_name not in mapping:
+    elif method == "tools/list":
+        # Return list of available tools
+        tools = [
+            {
+                "name": "get_food",
+                "description": "Get details for a single food item by FDC ID.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fdc_id": {"type": "string", "description": "The FDC ID of the food item"},
+                        "format_type": {"type": "string", "enum": ["abridged", "full"], "default": "full", "description": "Format of the response"},
+                        "nutrients": {"type": "array", "items": {"type": "integer"}, "description": "List of nutrient IDs to include"}
+                    },
+                    "required": ["fdc_id"]
+                }
+            },
+            {
+                "name": "get_foods",
+                "description": "Get details for multiple food items by FDC IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fdc_ids": {"type": "array", "items": {"type": "string"}, "description": "List of FDC IDs"},
+                        "format_type": {"type": "string", "enum": ["abridged", "full"], "default": "full"},
+                        "nutrients": {"type": "array", "items": {"type": "integer"}}
+                    },
+                    "required": ["fdc_ids"]
+                }
+            },
+            {
+                "name": "search_foods",
+                "description": "Search for foods using keywords.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "data_type": {"type": "array", "items": {"type": "string"}, "description": "Data types to search"},
+                        "page_size": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+                        "page_number": {"type": "integer", "default": 1, "minimum": 1},
+                        "sort_by": {"type": "string"},
+                        "sort_order": {"type": "string", "enum": ["asc", "desc"]},
+                        "brand_owner": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "list_foods",
+                "description": "Get a paged list of foods.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "data_type": {"type": "array", "items": {"type": "string"}},
+                        "page_size": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+                        "page_number": {"type": "integer", "default": 1, "minimum": 1},
+                        "sort_by": {"type": "string"},
+                        "sort_order": {"type": "string", "enum": ["asc", "desc"]}
+                    }
+                }
+            }
+        ]
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"tools": tools}
+        }
+
+    elif method == "tools/call":
+        # Call a tool
+        tool_name = params.get("name")
+        args = params.get("arguments") or {}
+
+        mapping = {
+            "get_food": get_food,
+            "get_foods": get_foods,
+            "search_foods": search_foods,
+            "list_foods": list_foods,
+        }
+
+        if tool_name not in mapping:
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+
+        fn = mapping[tool_name]
+
+        try:
+            result = await fn(**args) if asyncio.iscoroutinefunction(fn) else fn(**args)
+            # Wrap result in MCP content format for compatibility
+            if isinstance(result, str):
+                content = [{"type": "text", "text": result}]
+            else:
+                content = [{"type": "text", "text": json.dumps(result)}]
+            return {"jsonrpc": "2.0", "id": req_id, "result": {"content": content}}
+        except Exception as e:
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+
+    else:
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
-
-    fn = mapping[tool_name]
-
-    try:
-        # Call the coroutine function with the provided arguments
-        result = await fn(**args) if asyncio.iscoroutinefunction(fn) else fn(**args)
-        return {"jsonrpc": "2.0", "id": req_id, "result": result}
-    except Exception as e:
-        # Return JSON-RPC style error
-        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
-
-
-if __name__ == "__main__":
-    main()

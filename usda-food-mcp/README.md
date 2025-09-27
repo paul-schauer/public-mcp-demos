@@ -4,38 +4,6 @@ USDA Food Data Central MCP Server
 
 This repository provides both Python and TypeScript implementations of an MCP server for accessing USDA Food Data Central API.
 
-## TypeScript Version (Recommended for Railway)
-
-The TypeScript version uses the official MCP SDK and supergateway for stable HTTP+SSE deployment.
-
-### Requirements
-- Node.js 18+
-- npm
-
-### Installation
-```bash
-npm install
-```
-
-### Build
-```bash
-npm run build
-```
-
-### Environment
-- `USDA_FDC_API_KEY` - Your USDA FDC API key
-
-### Run locally (stdio)
-```bash
-npm run dev
-```
-
-### Deploy on Railway
-Use the Procfile with supergateway:
-```
-web: npx -y supergateway --stdio "node build/index.js" --port $PORT --ssePath /sse --messagePath /message --cors --healthEndpoint /healthz
-```
-
 ## Python Version (Alternative)
 
 This repository exposes your MCP tools (search_foods, get_food, get_foods, list_foods) and provides a small HTTP+SSE adapter so MCP clients (for example n8n's MCP Client Tool) can connect using the HTTP+SSE transport.
