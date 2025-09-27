@@ -1,1 +1,1 @@
-web: npx -y supergateway --stdio "node build/index.js" --port $PORT --ssePath /sse --messagePath /message --cors --healthEndpoint /healthz
+web: uvicorn adapter_http:api --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 120
