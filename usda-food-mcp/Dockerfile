@@ -19,5 +19,5 @@ COPY . .
 # Expose the default port used by the adapter
 EXPOSE 8000
 
-# Default command: run the FastAPI adapter with uvicorn
-CMD ["uvicorn", "adapter_http:api", "--host", "0.0.0.0", "--port", "${PORT:-8000}", "--timeout-keep-alive", "120"]
+# Default command: run the FastAPI adapter with uvicorn (bind to $PORT or 8000)
+CMD ["sh", "-c", "uvicorn adapter_http:api --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 120"]
