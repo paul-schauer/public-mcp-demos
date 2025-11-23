@@ -3,10 +3,15 @@ FROM python:3.11-slim
 # Set a working directory
 WORKDIR /app
 
-# Install system dependencies needed for building some Python packages
+# Install system dependencies needed for RDKit and other Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	build-essential \
 	curl \
+	libxrender1 \
+	libxext6 \
+	libsm6 \
+	libxrender-dev \
+	libgomp1 \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
