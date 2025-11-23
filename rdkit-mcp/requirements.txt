@@ -1,5 +1,5 @@
 mcp>=1.0.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
-rdkit-pypi>=2022.9.1
+rdkit-pypi
 Pillow>=10.0.0
