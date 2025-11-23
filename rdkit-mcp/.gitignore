@@ -1,0 +1,13 @@
+GEMINI.md
+.venv/
+.env
+input.json
+__pycache__/
+*.pyc
+rdkit_mcp.log
+node_modules/
+build/
+dist/
+*.tsbuildinfo
+__pycache__
+.github\workflows

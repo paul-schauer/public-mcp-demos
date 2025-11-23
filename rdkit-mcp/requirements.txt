@@ -1,0 +1,5 @@
+mcp>=1.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+rdkit>=2023.9.1
+Pillow>=10.0.0
