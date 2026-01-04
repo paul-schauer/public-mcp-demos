@@ -51,7 +51,7 @@ async def _make_request(endpoint: str, params: Optional[Dict[str, Any]] = None) 
     url = f"{OFF_API_BASE}{endpoint}"
     headers = {"User-Agent": USER_AGENT}
     
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
         response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         return response.json()
@@ -718,14 +718,14 @@ async def get_facet_knowledge_panel(
         # Knowledge panels API uses a different base URL
         url = f"{FACETS_KP_API_BASE}/knowledge_panel"
         params = {
-            "facet_type": facet_type,
-            "facet_value": facet_value,
-            "lang": language,
+            "facet_tag": facet_type,
+            "value_tag": facet_value,
+            "lang_code": language,
         }
         
         headers = {"User-Agent": USER_AGENT}
         
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
             response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()
