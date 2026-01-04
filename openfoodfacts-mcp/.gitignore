@@ -11,3 +11,5 @@ dist/
 *.tsbuildinfo
 __pycache__
 .github\workflows
+N8N/
+AgentSystemPrompt.md
