@@ -1,9 +1,8 @@
 .env
 .venv/
+.git/
 __pycache__/
 *.py[cod]
-*.egg-info/
 .pytest_cache/
 .ruff_cache/
-build/
-dist/
+tests/

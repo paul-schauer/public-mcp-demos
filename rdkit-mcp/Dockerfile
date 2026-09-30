@@ -1,28 +1,22 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Set a working directory
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    MCP_TRANSPORT=http
+
+# RDKit's drawing module links against libXrender and libXext
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libxrender1 libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 10001 app
 
-# Install system dependencies needed for RDKit and other Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	build-essential \
-	curl \
-	libxrender1 \
-	libxext6 \
-	libsm6 \
-	libxrender-dev \
-	libgomp1 \
-	&& rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application source
-COPY . .
-
-# Expose the default port used by the adapter
+USER app
 EXPOSE 8000
+HEALTHCHECK CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"8000\")}/healthz')"
 
-# Default command: run the FastAPI adapter with uvicorn (bind to $PORT or 8000)
-CMD ["sh", "-c", "uvicorn adapter_http:api --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 120"]
+CMD ["rdkit-mcp"]
