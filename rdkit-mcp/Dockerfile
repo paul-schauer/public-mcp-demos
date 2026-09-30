@@ -4,9 +4,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MCP_TRANSPORT=http
 
-# RDKit's drawing module links against libXrender and libXext
+# Shared libraries RDKit's drawing module links against (found with ldd)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libxrender1 libxext6 \
+    && apt-get install -y --no-install-recommends libexpat1 libx11-6 libxext6 libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

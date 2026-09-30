@@ -12,6 +12,16 @@ pytestmark = pytest.mark.skipif(os.environ.get("LIVE_TESTS") != "1", reason="set
 NUTELLA = "3017620422003"
 
 
+@pytest.fixture(autouse=True)
+async def fresh_client():
+    # Each test gets its own event loop, so an HTTP client can't be shared between tests
+    server.set_client(None)
+    yield
+    client = server.get_client()
+    server.set_client(None)
+    await client.aclose()
+
+
 async def call(tool: str, args: dict):
     async with Client(server.mcp) as client:
         result = await client.call_tool(tool, args)
