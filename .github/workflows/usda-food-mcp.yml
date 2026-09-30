@@ -1,0 +1,21 @@
+name: usda-food-mcp
+
+on:
+  push:
+    branches: [main]
+    paths: ["usda-food-mcp/**", ".github/workflows/usda-food-mcp.yml", ".github/workflows/_mcp-server.yml"]
+  pull_request:
+    paths: ["usda-food-mcp/**", ".github/workflows/usda-food-mcp.yml", ".github/workflows/_mcp-server.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/_mcp-server.yml
+    with:
+      project: usda-food-mcp
+      module: usda_food_mcp
+      live-tests: true
+    secrets: inherit

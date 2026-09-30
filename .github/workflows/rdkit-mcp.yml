@@ -1,0 +1,21 @@
+name: rdkit-mcp
+
+on:
+  push:
+    branches: [main]
+    paths: ["rdkit-mcp/**", ".github/workflows/rdkit-mcp.yml", ".github/workflows/_mcp-server.yml"]
+  pull_request:
+    paths: ["rdkit-mcp/**", ".github/workflows/rdkit-mcp.yml", ".github/workflows/_mcp-server.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/_mcp-server.yml
+    with:
+      project: rdkit-mcp
+      module: rdkit_mcp
+      live-tests: false
+    secrets: inherit

@@ -1,0 +1,72 @@
+# Shared CI for each MCP server in this repo. Called by the per-project workflows.
+name: mcp-server
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: Project directory, e.g. usda-food-mcp
+        required: true
+        type: string
+      module:
+        description: Python package name, e.g. usda_food_mcp
+        required: true
+        type: string
+      live-tests:
+        description: Also run the opt-in tests against the real upstream API
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: ${{ inputs.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ${{ inputs.project }} ${{ inputs.project }}
+      - name: Import the server inside the image (catches missing system libraries)
+        run: docker run --rm --entrypoint python ${{ inputs.project }} -c "import ${{ inputs.module }}.server"
+      - name: Refuses to serve HTTP without a token
+        run: |
+          if docker run --rm ${{ inputs.project }}; then
+            echo "expected startup to fail without MCP_BEARER_TOKEN"; exit 1
+          fi
+
+  live:
+    if: inputs.live-tests
+    runs-on: ubuntu-latest
+    # Third-party outages shouldn't block merges; a failure here still shows on the run.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: ${{ inputs.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -v tests/test_live.py
+        env:
+          LIVE_TESTS: "1"
+          USDA_FDC_API_KEY: ${{ secrets.USDA_FDC_API_KEY }}

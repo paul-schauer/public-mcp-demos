@@ -1,0 +1,21 @@
+name: openfoodfacts-mcp
+
+on:
+  push:
+    branches: [main]
+    paths: ["openfoodfacts-mcp/**", ".github/workflows/openfoodfacts-mcp.yml", ".github/workflows/_mcp-server.yml"]
+  pull_request:
+    paths: ["openfoodfacts-mcp/**", ".github/workflows/openfoodfacts-mcp.yml", ".github/workflows/_mcp-server.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/_mcp-server.yml
+    with:
+      project: openfoodfacts-mcp
+      module: openfoodfacts_mcp
+      live-tests: true
+    secrets: inherit

@@ -26,7 +26,8 @@ You need Python 3.11+ and a free API key from https://fdc.nal.usda.gov/api-key-s
 cd usda-food-mcp
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-pytest
+pytest                   # offline, with the API mocked
+LIVE_TESTS=1 pytest      # also runs a smoke test against the real API
 ```
 
 ### Use with Claude Desktop (stdio)
