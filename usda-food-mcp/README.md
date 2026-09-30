@@ -1,109 +1,101 @@
-# food-mcp
+# usda-food-mcp
 
-USDA Food Data Central MCP Server
+An [MCP](https://modelcontextprotocol.io) server that gives AI assistants access to
+[USDA FoodData Central](https://fdc.nal.usda.gov/), the U.S. government's nutrition
+database of 400k+ foods. You can ask Claude "how much protein is in 100 g of cheddar?"
+and it looks up the real data rather than guessing.
 
-This repository provides both Python and TypeScript implementations of an MCP server for accessing USDA Food Data Central API.
+## Tools
 
-## Python Version (Alternative)
+| Tool | What it does |
+| --- | --- |
+| `search_foods` | Keyword search, with optional filters for data type and brand owner. Returns FDC IDs. |
+| `get_food` | Full record for one food, optionally limited to specific nutrients. |
+| `get_foods` | Records for up to 20 foods in one call. |
+| `list_foods` | Page through foods in abridged form. |
 
-This repository exposes your MCP tools (search_foods, get_food, get_foods, list_foods) and provides a small HTTP+SSE adapter so MCP clients (for example n8n's MCP Client Tool) can connect using the HTTP+SSE transport.
+Tool inputs are validated from type hints (ranges, enums, list lengths), so an assistant
+gets a clear error for bad arguments before any API call is made.
 
-Files added/important:
-- `usda_fdc_mcp_server.py` - MCP tools and `handle_http_envelope` handler.
-- `adapter_http.py` - FastAPI adapter exposing `/mcp` (SSE) and `/messages` (POST) endpoints.
-- `app.py` - simple entrypoint that calls `main()` in `usda_fdc_mcp_server.py`.
-- `Procfile` - starts the FastAPI adapter with uvicorn (used for deployments like Railway).
-- `test_streamable_handshake.py` - local test script to perform the SSE handshake.
+## Quick start
 
-Requirements
-------------
-- Python 3.8+
-- Create and activate a virtualenv, then install requirements:
+You need Python 3.11+ and a free API key from https://fdc.nal.usda.gov/api-key-signup
+(`DEMO_KEY` also works for light testing).
 
-```powershell
-& .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+```bash
+cd usda-food-mcp
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest
 ```
 
-Environment
------------
-- `USDA_FDC_API_KEY` (required) — your USDA FDC API key. Set this in your deployment environment (do not commit it).
-- `MCP_BEARER_TOKEN` (optional) — if set, the adapter requires a Bearer token for `/mcp` and `/messages`.
+### Use with Claude Desktop (stdio)
 
-Run locally (adapter)
----------------------
-Start the FastAPI adapter (recommended) so HTTP+SSE clients can connect:
+Add this to `claude_desktop_config.json`:
 
-```powershell
-& .venv\Scripts\Activate.ps1
-$env:USDA_FDC_API_KEY = (Get-Content .env | Select-String 'USDA_FDC_API_KEY' | ForEach-Object { $_.ToString().Split('=',2)[1].Trim() })
-uvicorn adapter_http:api --host 0.0.0.0 --port 8000 --timeout-keep-alive 120
+```json
+{
+  "mcpServers": {
+    "usda-food": {
+      "command": "/path/to/usda-food-mcp/.venv/bin/usda-food-mcp",
+      "env": { "USDA_FDC_API_KEY": "your-key" }
+    }
+  }
+}
 ```
 
-The adapter will now be available at `http://127.0.0.1:8000`.
+### Run as a remote server (Streamable HTTP)
 
-Run locally (original MCP server)
--------------------------------
-If you want to run the original MCP process (not the HTTP adapter):
-
-```powershell
-python app.py
-```
-# food-mcp
-
-USDA Food Data Central MCP Server (Python-only)
-
-This repository provides a Python-based MCP server and a small FastAPI HTTP+SSE adapter
-that exposes MCP tools which call the USDA Food Data Central (FDC) API.
-
-Only the Python implementation remains in this repository. TypeScript/Node artifacts were removed.
-
-Requirements
-------------
-- Python 3.8+
-- Create and activate a virtualenv, then install requirements:
-
-```powershell
-& .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+```bash
+export USDA_FDC_API_KEY=your-key MCP_BEARER_TOKEN=$(openssl rand -hex 32)
+MCP_TRANSPORT=http usda-food-mcp          # serves http://0.0.0.0:8000/mcp
 ```
 
-Environment variables
----------------------
-- `USDA_FDC_API_KEY` (required) — your USDA FDC API key. Set this in your environment.
-- `MCP_BEARER_TOKEN` (optional) — if set, the FastAPI adapter will require a matching
-  Bearer token for `/mcp` requests.
+Or with Docker:
 
-Run locally (FastAPI adapter)
-----------------------------
-Start the FastAPI adapter so HTTP+SSE clients (for example n8n) can connect:
-
-```powershell
-& .venv\Scripts\Activate.ps1
-$env:USDA_FDC_API_KEY = "<your-api-key>"
-uvicorn adapter_http:api --host 0.0.0.0 --port 8000 --timeout-keep-alive 120
+```bash
+docker build -t usda-food-mcp .
+docker run -p 8000:8000 -e USDA_FDC_API_KEY -e MCP_BEARER_TOKEN usda-food-mcp
 ```
 
-The adapter will be available at `http://127.0.0.1:8000`.
+Point any Streamable HTTP client (Claude, n8n's MCP Client node, MCP Inspector) at
+`http://<host>:8000/mcp` with the header `Authorization: Bearer <token>`.
+`GET /healthz` is left unauthenticated for platform health checks.
 
-Endpoints (adapter)
--------------------
-- `GET /mcp` — create a session (returns `{ "session": "<id>" }`).
-- `GET /mcp` with header `mcp-session-id: <id>` and `Accept: text/event-stream` — open SSE stream for that session.
-- `POST /mcp` — send an MCP envelope (JSON). Include header `mcp-session-id: <id>` to route responses to that session.
-- `GET /healthz` — readiness probe.
-- `GET /mcp_status` — minimal module status (doesn't expose API key).
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `USDA_FDC_API_KEY` | required | FoodData Central API key |
+| `MCP_TRANSPORT` | `stdio` (`http` in Docker) | `stdio` or `http` |
+| `MCP_BEARER_TOKEN` | required for `http` | Shared secret that clients send as a bearer token |
+| `PORT` | `8000` | HTTP port |
+| `ALLOW_UNAUTHENTICATED` | unset | Set to `1` to serve HTTP without a token (local testing only) |
 
-Docker / Deploy
----------------
-A `Dockerfile` is included to build a Python image that installs `requirements.txt`
-and runs the FastAPI adapter with uvicorn. The `Procfile` uses the uvicorn command
-so platforms like Railway can start the adapter.
+## Design notes
 
-Notes
------
-- The Python MCP module (`usda_fdc_mcp_server.py`) requires `USDA_FDC_API_KEY`.
-  The FastAPI adapter imports that module lazily so the adapter can start and
-  present helpful errors if the key is missing.
+- **Built on the official MCP Python SDK.** Tool schemas come from the function signatures,
+  and the SDK handles the protocol and transport.
+- **The API key never leaves the server.** It goes in the `X-Api-Key` header rather than
+  the query string, so it can't appear in logged URLs. Upstream errors are mapped to
+  short messages (not found, rejected key, rate limited) instead of passing through raw
+  responses or tracebacks.
+- **The HTTP server is stateless.** Each request is independent, so nothing builds up in
+  memory and it scales horizontally. It refuses to start without a bearer token, because
+  an open endpoint would let anyone use your API quota.
+- **Tests make no network calls.** The HTTP layer is mocked with `respx`, and the tools
+  are exercised through a real in-process MCP client.
 
-License: MIT
+## History
+
+I first built this in August–September 2025 to give an n8n agent nutrition lookups,
+deployed on Railway. That version hand-rolled the MCP JSON-RPC and SSE handling in a
+FastAPI adapter to match what n8n expected at the time. The commit history shows
+that iteration, including a short-lived TypeScript port.
+
+In September 2026 I came back to it and rewrote it on MCP SDK v2 (which also fixed a
+build break, since the old unpinned `mcp>=1.0` dependency now resolved to v2). The rewrite
+closed the security gaps (tracebacks returned to callers, a timing-unsafe token check,
+unbounded sessions) and added tests, CI and packaging.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
