@@ -67,8 +67,8 @@ minus the API key.
   instead of multi-hundred-KB product records.
 - **The client identifies itself** with a User-Agent pointing at this repo, as Open Food
   Facts asks.
-- **Tests run offline** against a mocked API, and CI also runs a small set of live smoke
-  tests.
+- **Tests run offline** against a mocked API. A small live smoke suite can be run by hand
+  (`LIVE_TESTS=1 pytest`, or "Run workflow" on the Actions tab).
 
 ## History
 

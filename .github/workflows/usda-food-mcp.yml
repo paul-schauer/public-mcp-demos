@@ -17,5 +17,6 @@ jobs:
     with:
       project: usda-food-mcp
       module: usda_food_mcp
-      live-tests: true
+      # Real-API smoke tests run only when triggered by hand from the Actions tab
+      live-tests: ${{ github.event_name == 'workflow_dispatch' }}
     secrets: inherit

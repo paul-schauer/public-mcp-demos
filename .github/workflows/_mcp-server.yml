@@ -55,7 +55,7 @@ jobs:
   live:
     if: inputs.live-tests
     runs-on: ubuntu-latest
-    # Third-party outages shouldn't block merges; a failure here still shows on the run.
+    # Manual runs only; third-party outages should never block anything.
     continue-on-error: true
     defaults:
       run:
